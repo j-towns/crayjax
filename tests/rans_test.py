@@ -94,7 +94,7 @@ def test_rans_lax_fori_loop():
     tail_capacity = 100
     precision = 3
     n_data = 100
-    data = rng.integers(0, 4, size=(n_data, *shape))
+    data = jnp.array(rng.integers(0, 4, size=(n_data, *shape)))
 
     # x ~ Categorical(1 / 8, 2 / 8, 3 / 8, 2 / 8)
     m = m_init = rans.base_message(shape, tail_capacity)
@@ -114,10 +114,10 @@ def test_rans_lax_fori_loop():
 
     # Encode
     def push_body(i, carry):
-        m, xs = carry
-        m = codec_push(m, xs[n_data - i - 1])
-        return m, xs
-    m, _ = lax.fori_loop(0, n_data, push_body, (m, data))
+        m = carry
+        m = codec_push(m, data[n_data - i - 1])
+        return m
+    m = lax.fori_loop(0, n_data, push_body, m)
     coded_arr = rans.flatten(m)
     assert coded_arr.dtype == np.uint16
     print("Actual output shape: " + str(16 * len(coded_arr)) + " bits.")
