@@ -1,12 +1,8 @@
-"""
-Vectorized implementation of rANS based on https://arxiv.org/abs/1402.3392
-"""
 import numpy as np
 import jax.numpy as jnp
 from jax import lax
 
 
-rng = np.random.default_rng(0)
 head_prec, head_dtype = 32, 'uint32'
 tail_prec, tail_dtype = 16, 'uint16'
 head_min = 1 << head_prec - tail_prec

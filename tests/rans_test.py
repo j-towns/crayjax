@@ -107,7 +107,6 @@ def test_rans_lax_fori_loop():
         return choose(cf, jnp.array([0, 1, 1, 2, 2, 2, 3, 3]))
 
     codec_push, codec_pop = rans.rans((enc_fun, dec_fun, precision))
-    codec_push, codec_pop = map(jax.jit, (codec_push, codec_pop))
 
     _, freqs = enc_fun(data)
     print("Exact entropy: " + str(np.sum(np.log2(8 / freqs))) + " bits.")
