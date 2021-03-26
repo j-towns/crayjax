@@ -189,11 +189,11 @@ def categorical_pop(weights, prec, message):
     return substack(CategoricalUnsafe(weights, prec),
                     lambda x: x[0]).pop(message)
 
-@lru_cache
+@lru_cache()
 def std_gaussian_buckets(precision):
     return sp_norm.ppf(np.linspace(0, 1, (1 << precision) + 1))
 
-@lru_cache
+@lru_cache()
 def std_gaussian_centres(precision):
     return sp_norm.ppf((np.arange(1 << precision) + 0.5) / (1 << precision))
 
