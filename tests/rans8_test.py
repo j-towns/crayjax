@@ -18,6 +18,13 @@ def check_codec(head_shape, codec, data, capacity=default_capacity):
     assert rans.message_equal(message, message_)
     np.testing.assert_equal(data, data_)
 
+def test_copy():
+    x = jnp.array([1, 2, 3])
+    assert x is x
+    y = rans._copy(x)
+    assert y is not x
+    np.testing.assert_array_equal(y, x)
+
 def test_rans_simple():
     shape = (3,)
     tail_capacity = 100

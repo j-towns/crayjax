@@ -1,8 +1,13 @@
+from functools import partial
+
 from collections import namedtuple
 import numpy as np
 import jax.numpy as jnp
 from jax import lax, linear_transpose, tree_multimap
 from jax.util import safe_map
+from jax import jit
+
+from jax import lax
 
 
 Codec = namedtuple('Codec', ['push', 'pop'])
@@ -11,6 +16,8 @@ head_prec, head_dtype = 32, 'uint32'
 tail_prec, tail_dtype = 8,  'uint8'
 head_min = 1 << head_prec - tail_prec
 atleast_1d = lambda x: jnp.atleast_1d(x).astype(head_dtype)
+
+_copy = lambda x: jnp.array(np.copy(np.array(x)))
 
 def base_message(shape, tail_capacity):
     return jnp.full(shape, head_min, head_dtype), empty_stack(tail_capacity)
@@ -38,42 +45,59 @@ def stack_check(stack):
     limit, _ = stack
     assert limit >= 0
 
+def stack_copy(stack):
+    return map(_copy, stack)
+
+@partial(jit, donate_argnums=(0,))
+def push_core(m, starts, freqs, precs):
+    head, tail = m
+    idxs = head >> 2 * tail_prec >= freqs << head_prec - precs
+    tail = stack_push(tail, idxs, head.astype(tail_dtype))
+    head = jnp.where(idxs, head >> tail_prec, head)
+
+    idxs = head >> 1 * tail_prec >= freqs << head_prec - precs
+    tail = stack_push(tail, idxs, head.astype(tail_dtype))
+    head = jnp.where(idxs, head >> tail_prec, head)
+
+    idxs = head >= freqs << head_prec - precs
+    tail = stack_push(tail, idxs, head.astype(tail_dtype))
+    head = jnp.where(idxs, head >> tail_prec, head)
+
+    head_div_freqs, head_mod_freqs = jnp.divmod(head, freqs)
+    return (head_div_freqs << precs) + head_mod_freqs + starts, tail
+
+@partial(jit, donate_argnums=(0,))
+def pop_core(m, cfs, starts, freqs, precs):
+    head_, tail = m
+    head = freqs * (head_ >> precs) + cfs - starts
+    for _ in range(3):
+        idxs = head < head_min
+        tail, new_head = stack_pop(tail, idxs)
+        head = jnp.where(idxs, head << tail_prec | new_head, head)
+    return head, tail
+
+@jit
+def peek_core(m, precisions):
+    head, _ = m
+    return head & ((1 << precisions) - 1)
+
 def rans(model):
     enc_fun, dec_fun, precisions = model
     precisions = atleast_1d(precisions)
     def push(m, x):
-        starts, freqs = enc_fun(x)
-        starts, freqs = map(atleast_1d, (starts, freqs))
-        head, tail = m
-
-        idxs = head >> 2 * tail_prec >= freqs << head_prec - precisions
-        tail = stack_push(tail, idxs, head.astype(tail_dtype))
-        head = jnp.where(idxs, head >> tail_prec, head)
-
-        idxs = head >> 1 * tail_prec >= freqs << head_prec - precisions
-        tail = stack_push(tail, idxs, head.astype(tail_dtype))
-        head = jnp.where(idxs, head >> tail_prec, head)
-
-        idxs = head >= freqs << head_prec - precisions
-        tail = stack_push(tail, idxs, head.astype(tail_dtype))
-        head = jnp.where(idxs, head >> tail_prec, head)
-
-        head_div_freqs, head_mod_freqs = jnp.divmod(head, freqs)
-        return (head_div_freqs << precisions) + head_mod_freqs + starts, tail
+        starts, freqs = map(atleast_1d, enc_fun(x))
+        return push_core(m, starts, freqs, precisions)
 
     def pop(m):
-        head_, tail = m
-        cfs = head_ & ((1 << precisions) - 1)
+        cfs = peek_core(m, precisions)
         x = dec_fun(cfs)
-        starts, freqs = enc_fun(x)
-        starts, freqs = map(atleast_1d, (starts, freqs))
-        head = freqs * (head_ >> precisions) + cfs - starts
-        for _ in range(3):
-            idxs = head < head_min
-            tail, new_head = stack_pop(tail, idxs)
-            head = jnp.where(idxs, head << tail_prec | new_head, head)
-        return (head, tail), x
+        starts, freqs = map(atleast_1d, enc_fun(x))
+        return pop_core(m, cfs, starts, freqs, precisions), x
     return Codec(push, pop)
+
+def message_copy(m):
+    head, tail = m
+    return _copy(head), stack_copy(tail)
 
 def flatten(m):
     head, ([tail_limit,], tail_data) = m
