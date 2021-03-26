@@ -3,6 +3,7 @@ from functools import partial, lru_cache
 from collections import namedtuple
 import numpy as np
 from jax.scipy.stats import norm
+from scipy.stats import norm as sp_norm
 import jax.numpy as jnp
 from jax import lax, linear_transpose, tree_multimap, tree_map
 from jax.util import safe_map
@@ -190,15 +191,15 @@ def categorical_pop(weights, prec, message):
 
 @lru_cache
 def std_gaussian_buckets(precision):
-    return norm.ppf(jnp.linspace(0, 1, (1 << precision) + 1))
+    return sp_norm.ppf(np.linspace(0, 1, (1 << precision) + 1))
 
 @lru_cache
 def std_gaussian_centres(precision):
-    return norm.ppf((jnp.arange(1 << precision) + 0.5) / (1 << precision))
+    return sp_norm.ppf((np.arange(1 << precision) + 0.5) / (1 << precision))
 
 def _gaussian_cdf(mean, stdd, prior_prec, post_prec):
     def cdf(idx):
-        x = std_gaussian_buckets(prior_prec)[idx]
+        x = jnp.array(std_gaussian_buckets(prior_prec))[idx]
         return _nearest_uint(norm.cdf(x, mean, stdd) * (1 << post_prec))
     return cdf
 
@@ -209,7 +210,8 @@ def _gaussian_ppf(mean, stdd, prior_prec, post_prec):
         # Binary search is faster than using the actual gaussian cdf for the
         # precisions we typically use, however the cdf is O(1) whereas search
         # is O(precision), so for high precision cdf will be faster.
-        idxs = jnp.uint32(jnp.digitize(x, std_gaussian_buckets(prior_prec)) - 1)
+        idxs = jnp.uint32(jnp.digitize(
+            x, jnp.array(std_gaussian_buckets(prior_prec))) - 1)
         # This loop works around an issue which is extremely rare when we use
         # float64 everywhere but is common if we work with float32: due to the
         # finite precision of floating point arithmetic, norm.[cdf,ppf] are not
