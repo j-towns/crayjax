@@ -17,7 +17,7 @@ tail_prec, tail_dtype = 8,  'uint8'
 head_min = 1 << head_prec - tail_prec
 atleast_1d = lambda x: jnp.atleast_1d(x).astype(head_dtype)
 
-_copy = lambda x: jnp.array(np.copy(np.array(x)))
+_copy = lambda x: jnp.reshape(x[x == x], x.shape)
 
 def base_message(shape, tail_capacity):
     return jnp.full(shape, head_min, head_dtype), empty_stack(tail_capacity)
