@@ -1,7 +1,8 @@
-from functools import partial
+from functools import partial, lru_cache
 
 from collections import namedtuple
 import numpy as np
+from jax.scipy.stats import norm
 import jax.numpy as jnp
 from jax import lax, linear_transpose, tree_multimap, tree_map
 from jax.util import safe_map
@@ -175,3 +176,61 @@ def Bernoulli(p, prec):
     enc_statfun = lambda x: (jnp.where(x, onemp, 0), jnp.where(x, p, onemp))
     dec_statfun = lambda cf: jnp.uint32(cf >= onemp)
     return NonUniform(enc_statfun, dec_statfun, prec)
+
+
+@partial(jit, donate_argnums=(2,))
+def categorical_push(weights, prec, message, x):
+    return substack(CategoricalUnsafe(weights, prec),
+                    lambda x: x[0]).push(message, x)
+
+@partial(jit, donate_argnums=(2,))
+def categorical_pop(weights, prec, message):
+    return substack(CategoricalUnsafe(weights, prec),
+                    lambda x: x[0]).pop(message)
+
+@lru_cache
+def std_gaussian_buckets(precision):
+    return norm.ppf(jnp.linspace(0, 1, (1 << precision) + 1))
+
+@lru_cache
+def std_gaussian_centres(precision):
+    return norm.ppf((jnp.arange(1 << precision) + 0.5) / (1 << precision))
+
+def _gaussian_cdf(mean, stdd, prior_prec, post_prec):
+    def cdf(idx):
+        x = std_gaussian_buckets(prior_prec)[idx]
+        return _nearest_uint(norm.cdf(x, mean, stdd) * (1 << post_prec))
+    return cdf
+
+def _gaussian_ppf(mean, stdd, prior_prec, post_prec):
+    cdf = _gaussian_cdf(mean, stdd, prior_prec, post_prec)
+    def ppf(cf):
+        x = norm.ppf((cf + 0.5) / (1 << post_prec), mean, stdd)
+        # Binary search is faster than using the actual gaussian cdf for the
+        # precisions we typically use, however the cdf is O(1) whereas search
+        # is O(precision), so for high precision cdf will be faster.
+        idxs = jnp.uint32(jnp.digitize(x, std_gaussian_buckets(prior_prec)) - 1)
+        # This loop works around an issue which is extremely rare when we use
+        # float64 everywhere but is common if we work with float32: due to the
+        # finite precision of floating point arithmetic, norm.[cdf,ppf] are not
+        # perfectly inverse to each other.
+        idxs = lax.while_loop(
+            lambda idxs: ~jnp.all((cdf(idxs) <= cf) & (cf < cdf(idxs + 1))),
+            lambda idxs: jnp.select(
+                [cf < cdf(idxs), cf >= cdf(idxs + 1)],
+                [idxs - 1,       idxs + 1           ], idxs),
+            idxs)
+        return idxs
+    return ppf
+
+def DiagGaussian_StdBins(mean, stdd, coding_prec, bin_prec):
+    """
+    Codec for data from a diagonal Gaussian with bins that have equal mass under
+    a standard (0, I) Gaussian
+    """
+    def enc_statfun(x):
+        lower = _gaussian_cdf(mean, stdd, bin_prec, coding_prec)(x)
+        upper = _gaussian_cdf(mean, stdd, bin_prec, coding_prec)(x + 1)
+        return lower, upper - lower
+    dec_statfun = _gaussian_ppf(mean, stdd, bin_prec, coding_prec)
+    return NonUniform(enc_statfun, dec_statfun, coding_prec)

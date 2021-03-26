@@ -202,3 +202,20 @@ def test_bernoulli():
     p = rng.random(shape)
     data = np.uint64(rng.random(shape) < p)
     check_codec(shape, rans.Bernoulli(p, precision), data)
+
+def test_gaussian_stdbins():
+    bin_precision = 8
+    coding_precision = 12
+    batch_size = 5
+
+    # if the gaussian distributions have little overlap then will
+    # get zero freq errors
+    means = rng.normal() / 10
+    stdds = np.exp(rng.normal() / 10.)
+
+    data = np.array([rng.choice(1 << bin_precision) for _ in range(batch_size)])
+
+    check_codec((batch_size,),
+                rans.DiagGaussian_StdBins(
+                    means, stdds, coding_precision, bin_precision),
+                data)
