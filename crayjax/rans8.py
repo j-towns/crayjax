@@ -164,7 +164,14 @@ def CategoricalUnsafe(weights, prec):
         return lower, upper - lower
     def dec_statfun(cf):
         # One could speed this up for large alphabets by
-        #   (a) Using vectorized binary search, not available in numpy
+        #   (a) Using vectorized binary search
         #   (b) Using the alias method
         return jnp.argmin(cumfreqs <= cf[..., None], axis=-1) - 1
+    return NonUniform(enc_statfun, dec_statfun, prec)
+
+def Bernoulli(p, prec):
+    p = jnp.clip(_nearest_uint(p * (1 << prec)), 1, (1 << prec) - 1)
+    onemp = (1 << prec) - p
+    enc_statfun = lambda x: (jnp.where(x, onemp, 0), jnp.where(x, p, onemp))
+    dec_statfun = lambda cf: jnp.uint32(cf >= onemp)
     return NonUniform(enc_statfun, dec_statfun, prec)

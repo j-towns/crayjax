@@ -195,3 +195,10 @@ def test_categorical_unsafe():
     data = np.reshape([rng.choice(4, p=p) for p in ps], shape)
     weights = np.reshape(weights, shape + (4,))
     check_codec(shape, rans.CategoricalUnsafe(weights, precision), data)
+
+def test_bernoulli():
+    precision = 4
+    shape = (2, 3, 5)
+    p = rng.random(shape)
+    data = np.uint64(rng.random(shape) < p)
+    check_codec(shape, rans.Bernoulli(p, precision), data)
