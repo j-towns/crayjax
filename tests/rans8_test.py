@@ -41,7 +41,7 @@ def test_rans_simple():
             cf < 6,
             jnp.choose(cf, [0, 1, 1, 2, 2, 2], mode='clip'),
             3)
-    codec_push, codec_pop = rans.rans((enc_fun, dec_fun, precision))
+    codec_push, codec_pop = rans.NonUniform(enc_fun, dec_fun, precision)
     _, freqs = enc_fun(data)
     print("Exact entropy: " + str(np.sum(np.log2(8 / freqs))) + " bits.")
     # Encode
@@ -79,7 +79,7 @@ def test_rans_jit():
         assert is_tracing
         return choose(cf, jnp.array([0, 1, 1, 2, 2, 2, 3, 3]))
 
-    codec_push, codec_pop = rans.rans((enc_fun, dec_fun, precision))
+    codec_push, codec_pop = rans.NonUniform(enc_fun, dec_fun, precision)
     codec_push, codec_pop = map(jax.jit, (codec_push, codec_pop))
 
     is_tracing = True
@@ -124,7 +124,7 @@ def test_rans_lax_fori_loop():
     def dec_fun(cf):
         return choose(cf, jnp.array([0, 1, 1, 2, 2, 2, 3, 3]))
 
-    codec_push, codec_pop = rans.rans((enc_fun, dec_fun, precision))
+    codec_push, codec_pop = rans.NonUniform(enc_fun, dec_fun, precision)
 
     _, freqs = enc_fun(data)
     print("Exact entropy: " + str(np.sum(np.log2(8 / freqs))) + " bits.")

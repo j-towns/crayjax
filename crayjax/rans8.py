@@ -81,8 +81,7 @@ def peek_core(m, precisions):
     head, _ = m
     return head & ((1 << precisions) - 1)
 
-def rans(model):
-    enc_fun, dec_fun, precisions = model
+def NonUniform(enc_fun, dec_fun, precisions):
     precisions = atleast_1d(precisions)
     def push(m, x):
         starts, freqs = map(atleast_1d, enc_fun(x))
@@ -122,9 +121,6 @@ def unflatten(arr, shape, tail_capacity):
 
 def message_equal(message1, message2):
     return jnp.all(flatten(message1) == flatten(message2))
-
-def NonUniform(enc_statfun, dec_statfun, precision):
-    return rans((enc_statfun, dec_statfun, precision))
 
 _uniform_enc_statfun = lambda s: (s, 1)
 _uniform_dec_statfun = lambda cf: cf
