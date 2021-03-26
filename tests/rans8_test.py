@@ -7,8 +7,16 @@ import jax
 import jax.numpy as jnp
 from jax import lax
 
-rng = np.random.default_rng(0)
 
+rng = np.random.default_rng(0)
+default_capacity = 500
+
+def check_codec(head_shape, codec, data, capacity=default_capacity):
+    message = rans.base_message(head_shape, capacity)
+    push, pop = codec
+    message_, data_ = pop(push(message, data))
+    assert rans.message_equal(message, message_)
+    np.testing.assert_equal(data, data_)
 
 def test_rans_simple():
     shape = (3,)
@@ -133,3 +141,24 @@ def test_rans_lax_fori_loop():
     m, data_decoded = lax.fori_loop(0, n_data, pop_body,
                                     (m, jnp.zeros((n_data, *shape), 'int32')))
     assert rans.message_equal(m, m_init)
+
+def test_uniform():
+    precision = 4
+    shape = (2, 3, 5)
+    data = rng.integers(precision, size=shape, dtype="uint64")
+    check_codec(shape, rans.Uniform(precision), data)
+
+def test_substack():
+    prec = 4
+    message = rans.base_message((4, 4), 50)
+    data = rng.integers(1 << prec, size=(2, 4), dtype='uint64')
+    view_split = lambda h: jnp.split(h, 2)
+    view_left  = lambda h: view_split(h)[0]
+    view_right = lambda h: view_split(h)[1]
+    append, pop = rans.substack(rans.Uniform(prec), view_left)
+    message_ = append(message, data)
+    np.testing.assert_array_equal(view_right(message_[0]),
+                                  view_right(message[0]))
+    message_, data_ = pop(message_)
+    assert rans.message_equal(message, message_)
+    np.testing.assert_equal(data, data_)
