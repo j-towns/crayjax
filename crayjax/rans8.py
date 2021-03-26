@@ -147,3 +147,24 @@ def substack(codec, view_fun):
         (subhead, tail), data = codec.pop((subhead, tail), *args, **kwargs)
         return (update(subhead), tail), data
     return Codec(push, pop)
+
+def _nearest_uint(arr):
+    return jnp.uint32(jnp.ceil(arr - 0.5))
+
+def _undiff(x):
+    return jnp.concatenate([jnp.zeros_like(x, shape=(*x.shape[:-1], 1)),
+                            jnp.cumsum(x, -1)], -1)
+
+def CategoricalUnsafe(weights, prec):
+    cumweights = _undiff(weights)
+    cumfreqs = _nearest_uint((1 << prec) * (cumweights / cumweights[..., -1:]))
+    def enc_statfun(x):
+        lower = jnp.take_along_axis(cumfreqs, x[..., None], -1)[..., 0]
+        upper = jnp.take_along_axis(cumfreqs, x[..., None] + 1, -1)[..., 0]
+        return lower, upper - lower
+    def dec_statfun(cf):
+        # One could speed this up for large alphabets by
+        #   (a) Using vectorized binary search, not available in numpy
+        #   (b) Using the alias method
+        return jnp.argmin(cumfreqs <= cf[..., None], axis=-1) - 1
+    return NonUniform(enc_statfun, dec_statfun, prec)

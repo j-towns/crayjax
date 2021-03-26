@@ -15,7 +15,7 @@ def check_codec(head_shape, codec, data, capacity=default_capacity):
     message = rans.base_message(head_shape, capacity)
     push, pop = codec
     message_, data_ = pop(push(message, data))
-    assert rans.message_equal(message, message_)
+    assert rans.message_equal(rans.base_message(head_shape, capacity), message_)
     np.testing.assert_equal(data, data_)
 
 def test_copy():
@@ -167,7 +167,7 @@ def test_substack():
     np.testing.assert_array_equal(view_right(message_[0]),
                                   view_right(message[0]))
     message_, data_ = pop(message_)
-    assert rans.message_equal(message, message_)
+    assert rans.message_equal(rans.base_message((4, 4), 50), message_)
     np.testing.assert_equal(data, data_)
 
     append, pop = jax.jit(append), jax.jit(pop)
@@ -186,3 +186,12 @@ def test_substack():
     message_, data_ = pop(message_)
     assert rans.message_equal(message, message_)
     np.testing.assert_equal(data, data_)
+
+def test_categorical_unsafe():
+    precision = 4
+    shape = (20, 3, 5)
+    weights = rng.random((np.prod(shape), 4))
+    ps = weights / np.sum(weights, axis=-1, keepdims=True)
+    data = np.reshape([rng.choice(4, p=p) for p in ps], shape)
+    weights = np.reshape(weights, shape + (4,))
+    check_codec(shape, rans.CategoricalUnsafe(weights, precision), data)
