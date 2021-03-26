@@ -162,3 +162,20 @@ def test_substack():
     message_, data_ = pop(message_)
     assert rans.message_equal(message, message_)
     np.testing.assert_equal(data, data_)
+
+    append, pop = jax.jit(append), jax.jit(pop)
+    message = rans.base_message((4, 4), 50)
+    message_ = append(message, data)
+    np.testing.assert_array_equal(view_right(message_[0]),
+                                  view_right(message[0]))
+    message_, data_ = pop(message_)
+    assert rans.message_equal(message, message_)
+    np.testing.assert_equal(data, data_)
+
+    message = rans.base_message((4, 4), 50)
+    message_ = append(message, data)
+    np.testing.assert_array_equal(view_right(message_[0]),
+                                  view_right(message[0]))
+    message_, data_ = pop(message_)
+    assert rans.message_equal(message, message_)
+    np.testing.assert_equal(data, data_)
