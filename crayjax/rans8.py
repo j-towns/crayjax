@@ -3,7 +3,7 @@ from functools import partial
 from collections import namedtuple
 import numpy as np
 import jax.numpy as jnp
-from jax import lax, linear_transpose, tree_multimap
+from jax import lax, linear_transpose, tree_multimap, tree_map
 from jax.util import safe_map
 from jax import jit
 
@@ -17,7 +17,7 @@ tail_prec, tail_dtype = 8,  'uint8'
 head_min = 1 << head_prec - tail_prec
 atleast_1d = lambda x: jnp.atleast_1d(x).astype(head_dtype)
 
-_copy = lambda x: jnp.reshape(x[x == x], x.shape)
+_copy = lambda x: jnp.reshape(jnp.ravel(x), x.shape)
 
 def base_message(shape, tail_capacity):
     return jnp.full(shape, head_min, head_dtype), empty_stack(tail_capacity)
@@ -129,8 +129,9 @@ def Uniform(precision):
 
 def view_update(data, view_fun):
     item, view_transpose = view_fun(data), linear_transpose(view_fun, data)
+    item_copy = tree_map(_copy, item)
     def update(new_item):
-        diff, = view_transpose(tree_multimap(jnp.subtract, new_item, item))
+        diff, = view_transpose(tree_multimap(jnp.subtract, new_item, item_copy))
         return tree_multimap(jnp.add, data, diff)
     return item, update
 
