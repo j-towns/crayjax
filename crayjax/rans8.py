@@ -1,25 +1,20 @@
-from functools import partial, lru_cache
-
 from collections import namedtuple
 import numpy as np
 from jax.scipy.stats import norm
-from scipy.stats import norm as sp_norm
 import jax.numpy as jnp
-from jax import lax, linear_transpose, tree_multimap, tree_map
+from jax import lax, linear_transpose, tree_multimap
 from jax.util import safe_map
-from jax import jit
-
-from jax import lax
 
 
+map = safe_map
 Codec = namedtuple('Codec', ['push', 'pop'])
 
 head_prec, head_dtype = 32, 'uint32'
 tail_prec, tail_dtype = 8,  'uint8'
 head_min = 1 << head_prec - tail_prec
-atleast_1d = lambda x: jnp.atleast_1d(x).astype(head_dtype)
 
-_copy = jit(lambda x: (x + 1) - 1)
+
+atleast_1d = lambda x: jnp.atleast_1d(x).astype(head_dtype)
 
 def base_message(shape, tail_capacity):
     return jnp.full(shape, head_min, head_dtype), empty_stack(tail_capacity)
@@ -44,31 +39,27 @@ def stack_pop(stack, idxs):
                                            idxs_flat.shape))[1], idxs.shape)
 
 def stack_check(stack):
-    limit, _ = stack
-    assert limit >= 0
+    limit, data = stack
+    capacity, = data.shape
+    assert 0 <= limit <= capacity
 
-def stack_copy(stack):
-    return map(_copy, stack)
-
-@partial(jit, donate_argnums=(0,))
 def push_core(m, starts, freqs, precs):
     head, tail = m
-    idxs = head >> 2 * tail_prec >= freqs << head_prec - precs
+    idxs = head >> 2 * tail_prec + head_prec - precs >= freqs
     tail = stack_push(tail, idxs, head.astype(tail_dtype))
     head = jnp.where(idxs, head >> tail_prec, head)
 
-    idxs = head >> 1 * tail_prec >= freqs << head_prec - precs
+    idxs = head >> 1 * tail_prec + head_prec - precs >= freqs
     tail = stack_push(tail, idxs, head.astype(tail_dtype))
     head = jnp.where(idxs, head >> tail_prec, head)
 
-    idxs = head >= freqs << head_prec - precs
+    idxs = head >> head_prec - precs >= freqs
     tail = stack_push(tail, idxs, head.astype(tail_dtype))
     head = jnp.where(idxs, head >> tail_prec, head)
 
     head_div_freqs, head_mod_freqs = jnp.divmod(head, freqs)
     return (head_div_freqs << precs) + head_mod_freqs + starts, tail
 
-@partial(jit, donate_argnums=(0,))
 def pop_core(m, cfs, starts, freqs, precs):
     head_, tail = m
     head = freqs * (head_ >> precs) + cfs - starts
@@ -78,7 +69,6 @@ def pop_core(m, cfs, starts, freqs, precs):
         head = jnp.where(idxs, head << tail_prec | new_head, head)
     return head, tail
 
-@jit
 def peek_core(m, precisions):
     head, _ = m
     return head & ((1 << precisions) - 1)
@@ -93,12 +83,9 @@ def NonUniform(enc_fun, dec_fun, precisions):
         cfs = peek_core(m, precisions)
         x = dec_fun(cfs)
         starts, freqs = map(atleast_1d, enc_fun(x))
-        return pop_core(m, cfs, starts, freqs, precisions), x
+        res = pop_core(m, cfs, starts, freqs, precisions), x
+        return res
     return Codec(push, pop)
-
-def message_copy(m):
-    head, tail = m
-    return _copy(head), stack_copy(tail)
 
 def flatten(m):
     head, ([tail_limit,], tail_data) = m
@@ -131,9 +118,8 @@ def Uniform(precision):
 
 def view_update(data, view_fun):
     item, view_transpose = view_fun(data), linear_transpose(view_fun, data)
-    item_copy = tree_map(_copy, item)
     def update(new_item):
-        diff, = view_transpose(tree_multimap(jnp.subtract, new_item, item_copy))
+        diff, = view_transpose(tree_multimap(jnp.subtract, new_item, item))
         return tree_multimap(jnp.add, data, diff)
     return item, update
 
@@ -178,28 +164,23 @@ def Bernoulli(p, prec):
     dec_statfun = lambda cf: jnp.uint32(cf >= onemp)
     return NonUniform(enc_statfun, dec_statfun, prec)
 
-
-@partial(jit, donate_argnums=(2,))
 def categorical_push(weights, prec, message, x):
     return substack(CategoricalUnsafe(weights, prec),
                     lambda x: x[0]).push(message, x)
 
-@partial(jit, donate_argnums=(2,))
 def categorical_pop(weights, prec, message):
     return substack(CategoricalUnsafe(weights, prec),
                     lambda x: x[0]).pop(message)
 
-@lru_cache()
-def std_gaussian_buckets(precision):
-    return sp_norm.ppf(np.linspace(0, 1, (1 << precision) + 1))
+def std_gaussian_bins(precision):
+    return norm.ppf(jnp.linspace(0, 1, (1 << precision) + 1))
 
-@lru_cache()
 def std_gaussian_centres(precision):
-    return sp_norm.ppf((np.arange(1 << precision) + 0.5) / (1 << precision))
+    return norm.ppf((jnp.arange(1 << precision) + 0.5) / (1 << precision))
 
 def _gaussian_cdf(mean, stdd, prior_prec, post_prec):
     def cdf(idx):
-        x = jnp.array(std_gaussian_buckets(prior_prec))[idx]
+        x = std_gaussian_bins(prior_prec)[idx]
         return _nearest_uint(norm.cdf(x, mean, stdd) * (1 << post_prec))
     return cdf
 
@@ -210,19 +191,18 @@ def _gaussian_ppf(mean, stdd, prior_prec, post_prec):
         # Binary search is faster than using the actual gaussian cdf for the
         # precisions we typically use, however the cdf is O(1) whereas search
         # is O(precision), so for high precision cdf will be faster.
-        idxs = jnp.uint32(jnp.digitize(
-            x, jnp.array(std_gaussian_buckets(prior_prec))) - 1)
+        idxs = jnp.digitize(x, std_gaussian_bins(prior_prec)) - 1
         # This loop works around an issue which is extremely rare when we use
         # float64 everywhere but is common if we work with float32: due to the
         # finite precision of floating point arithmetic, norm.[cdf,ppf] are not
         # perfectly inverse to each other.
-        idxs = lax.while_loop(
+        idxs_ = lax.while_loop(
             lambda idxs: ~jnp.all((cdf(idxs) <= cf) & (cf < cdf(idxs + 1))),
             lambda idxs: jnp.select(
                 [cf < cdf(idxs), cf >= cdf(idxs + 1)],
                 [idxs - 1,       idxs + 1           ], idxs),
             idxs)
-        return idxs
+        return idxs_
     return ppf
 
 def DiagGaussian_StdBins(mean, stdd, coding_prec, bin_prec):

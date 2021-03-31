@@ -8,22 +8,29 @@ import jax.numpy as jnp
 from jax import lax
 
 
-rng = np.random.default_rng(0)
-default_capacity = 500
+rng = np.random.default_rng(1)
+default_capacity = 1024
+
+def check_codec_unsafe(head_shape, codec, capacity=default_capacity):
+    message = rans.base_message(head_shape, capacity)
+    message = rans.Uniform(16).push(
+        message, rng.integers(1 << 16, size=head_shape))
+    message = rans.Uniform(16).push(
+        message, rng.integers(1 << 16, size=head_shape))
+    push, pop = codec
+    message_, data = pop(message)
+    message__ = push(message_, data)
+    assert rans.message_equal(message, message__)
+    message___, data_ = pop(message__)
+    assert np.all(data == data_)
+    assert rans.message_equal(message_, message___)
 
 def check_codec(head_shape, codec, data, capacity=default_capacity):
     message = rans.base_message(head_shape, capacity)
     push, pop = codec
     message_, data_ = pop(push(message, data))
     assert rans.message_equal(rans.base_message(head_shape, capacity), message_)
-    np.testing.assert_equal(data, data_)
-
-def test_copy():
-    x = jnp.array([[1, 2, 3]])
-    assert x is x
-    y = rans._copy(x)
-    assert y is not x
-    np.testing.assert_array_equal(y, x)
+    assert np.all(data == data_)
 
 def test_rans_simple():
     shape = (3,)
@@ -189,16 +196,14 @@ def test_substack():
 
 def test_categorical_unsafe():
     precision = 4
-    shape = (20, 3, 5)
+    shape = (5, 3, 5)
     weights = rng.random((np.prod(shape), 4))
-    ps = weights / np.sum(weights, axis=-1, keepdims=True)
-    data = np.reshape([rng.choice(4, p=p) for p in ps], shape)
     weights = np.reshape(weights, shape + (4,))
-    check_codec(shape, rans.CategoricalUnsafe(weights, precision), data)
+    check_codec_unsafe(shape, rans.CategoricalUnsafe(weights, precision))
 
 def test_bernoulli():
-    precision = 4
-    shape = (2, 3, 5)
+    precision = 2
+    shape = (100,)
     p = rng.random(shape)
     data = np.uint64(rng.random(shape) < p)
     check_codec(shape, rans.Bernoulli(p, precision), data)
@@ -206,16 +211,12 @@ def test_bernoulli():
 def test_gaussian_stdbins():
     bin_precision = 8
     coding_precision = 12
-    batch_size = 5
+    batch_size = 1000
 
     # if the gaussian distributions have little overlap then will
     # get zero freq errors
-    means = rng.normal() / 10
-    stdds = np.exp(rng.normal() / 10.)
+    means = jnp.array(rng.normal(size=batch_size))
+    stdds = jnp.array(np.exp(rng.normal(size=batch_size)))
 
-    data = np.array([rng.choice(1 << bin_precision) for _ in range(batch_size)])
-
-    check_codec((batch_size,),
-                rans.DiagGaussian_StdBins(
-                    means, stdds, coding_precision, bin_precision),
-                data)
+    check_codec_unsafe((batch_size,), rans.DiagGaussian_StdBins(
+            means, stdds, coding_precision, bin_precision))
