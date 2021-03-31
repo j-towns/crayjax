@@ -1,6 +1,6 @@
 from functools import partial
 
-import rans8 as rans
+import rans as rans
 from numpy.testing import assert_equal
 import numpy as np
 import jax
