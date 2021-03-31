@@ -18,9 +18,8 @@ from jax.util import safe_map
 map = safe_map
 atleast_1d = lambda x: jnp.atleast_1d(x).astype(head_dtype)
 
-########################### Vectorized rANS core ##############################
-Codec = namedtuple('Codec', ['push', 'pop'])
 
+########################### Vectorized rANS core ##############################
 head_prec, head_dtype = 32, 'uint32'
 tail_prec, tail_dtype = 8,  'uint8'
 head_min = 1 << head_prec - tail_prec
@@ -106,7 +105,10 @@ def unflatten(arr, shape, tail_capacity):
 def message_equal(message1, message2):
     return jnp.all(flatten(message1) == flatten(message2))
 
+
 ##################### High level craystack-style API ##########################
+Codec = namedtuple('Codec', ['push', 'pop'])
+
 def NonUniform(enc_fun, dec_fun, precisions):
     precisions = atleast_1d(precisions)
     def push_(m, x):
