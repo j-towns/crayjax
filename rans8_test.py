@@ -1,6 +1,6 @@
 from functools import partial
 
-from crayjax import rans8 as rans
+import rans8 as rans
 from numpy.testing import assert_equal
 import numpy as np
 import jax
@@ -209,8 +209,6 @@ def test_gaussian_stdbins():
     coding_precision = 12
     batch_size = 1000
 
-    # if the gaussian distributions have little overlap then will
-    # get zero freq errors
     means = jnp.array(rng.normal(size=batch_size))
     stdds = jnp.array(np.exp(rng.normal(size=batch_size)))
 
