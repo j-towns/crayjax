@@ -50,13 +50,11 @@ def test_rans_simple():
             3)
     codec_push, codec_pop = rans.NonUniform(enc_fun, dec_fun, precision)
     _, freqs = enc_fun(data)
-    print("Exact entropy: " + str(np.sum(np.log2(8 / freqs))) + " bits.")
     # Encode
     for x in reversed(data):
         m = codec_push(m, x)
     coded_arr = rans.flatten(m)
     assert coded_arr.dtype == np.uint8
-    print("Actual output shape: " + str(8 * len(coded_arr)) + " bits.")
 
     # Decode
     m = rans.unflatten(coded_arr, shape, tail_capacity)
@@ -134,7 +132,6 @@ def test_rans_lax_fori_loop():
     codec_push, codec_pop = rans.NonUniform(enc_fun, dec_fun, precision)
 
     _, freqs = enc_fun(data)
-    print("Exact entropy: " + str(np.sum(np.log2(8 / freqs))) + " bits.")
 
     # Encode
     def push_body(i, carry):
@@ -144,7 +141,6 @@ def test_rans_lax_fori_loop():
     m = lax.fori_loop(0, n_data, push_body, m)
     coded_arr = rans.flatten(m)
     assert coded_arr.dtype == np.uint8
-    print("Actual output shape: " + str(16 * len(coded_arr)) + " bits.")
 
     # Decode
     def pop_body(i, carry):
