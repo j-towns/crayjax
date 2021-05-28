@@ -31,8 +31,7 @@ def empty_stack(capacity):
     return jnp.array([capacity]), jnp.zeros(capacity, tail_dtype)
 
 def _selector(idxs):
-    c = jnp.cumsum(idxs)
-    return jnp.concatenate([c[:1], jnp.where(jnp.diff(c), c[1:], 0)]) - 1
+    return jnp.where(idxs, jnp.cumsum(idxs), 0) - 1
 
 def stack_push(stack, idxs, arr):
     idxs, arr = jnp.ravel(idxs), jnp.ravel(arr)
