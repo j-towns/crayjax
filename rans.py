@@ -30,21 +30,21 @@ def base_message(shape, tail_capacity):
 def empty_stack(capacity):
     return jnp.array([capacity]), jnp.zeros(capacity, tail_dtype)
 
+def _selector(idxs):
+    c = jnp.cumsum(idxs)
+    return jnp.concatenate([c[:1], jnp.where(jnp.diff(c), c[1:], 0)]) - 1
+
 def stack_push(stack, idxs, arr):
     idxs, arr = jnp.ravel(idxs), jnp.ravel(arr)
     limit, data = stack
-    return limit - idxs.sum(), lax.dynamic_update_slice(
-        data, lax.sort_key_val(idxs, arr)[1], limit - arr.size)
+    limit = limit - idxs.sum()
+    return limit, data.at[limit + _selector(idxs)].set(arr)
 
 def stack_pop(stack, idxs):
-    idxs_flat = jnp.ravel(idxs)
+    idxs, idxs_shape = jnp.ravel(idxs), idxs.shape
     limit, data = stack
-    unsorted = lax.sort_key_val(idxs_flat, jnp.arange(idxs.size))[1]
-    limit = limit + idxs.sum()
-    return (limit, data), jnp.reshape(
-        lax.sort_key_val(unsorted,
-                         lax.dynamic_slice(data, limit - idxs.size,
-                                           idxs_flat.shape))[1], idxs.shape)
+    return (limit + idxs.sum(), data), jnp.reshape(
+        data[limit + _selector(idxs)], idxs_shape)
 
 def stack_check(stack):
     limit, data = stack
@@ -69,8 +69,8 @@ def push(m, starts, freqs, precs):
     return (head_div_freqs << precs) + head_mod_freqs + starts, tail
 
 def pop(m, cfs, starts, freqs, precs):
-    head_, tail = m
-    head = freqs * (head_ >> precs) + cfs - starts
+    head, tail = m
+    head = freqs * (head >> precs) + cfs - starts
     for _ in range(3):
         idxs = head < head_min
         tail, new_head = stack_pop(tail, idxs)
