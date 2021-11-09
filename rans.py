@@ -13,6 +13,7 @@ from jax.scipy.stats import norm
 import jax.numpy as jnp
 from jax import lax, linear_transpose, tree_multimap
 from jax.util import safe_map
+from jax import lax
 
 
 map = safe_map
@@ -104,6 +105,95 @@ def unflatten(arr, shape, tail_capacity):
 def message_equal(message1, message2):
     return jnp.all(flatten(message1) == flatten(message2))
 
+########################## Fenwick trees ######################################
+# Fenwick trees are a dense representation of a multiset in an array, with
+# O(log|alphabet|) lookup, insert and remove.
+
+# Based on Wikipedia's C implementation
+# https://en.wikipedia.org/wiki/Fenwick_tree#Basic_implementation_in_C
+
+def _lsb(symbol):  # Least significant bit
+    return symbol & -symbol
+
+def full_slice(level):
+    return slice(1 << level, None, 2 << level)
+
+def left_slice(level):
+    return slice(1 << level, None, 4 << level)
+
+def right_slice(level):
+    return slice(3 << level, None, 4 << level)
+
+def fenwick_parent(i):
+    l = _lsb(i)
+    return (i - l) | (l << 1)
+
+def fenwick_child_left(i):
+    return i - (_lsb(i) >> 1)
+
+def fenwick_child_right(i):
+    return i + (_lsb(i) >> 1)
+
+def fenwick_empty_tree(prec):
+    return jnp.zeros(1 << prec, 'uint32')
+
+def fenwick_from_freqs(freqs):
+    assert freqs.dtype == jnp.uint32
+    fs_size, = freqs.shape
+    assert fs_size >= 1
+    size = 1
+    tree_depth = 0
+    while size < fs_size:  # Round up to a power of two
+        size = size << 1
+        tree_depth = tree_depth + 1
+
+    if size > fs_size:
+        freqs = jnp.concatenate([freqs, jnp.zeros(size - fs_size, 'uint32')])
+
+    for level in range(tree_depth - 1):
+        freqs = freqs.at[full_slice(level + 1)].add(freqs[left_slice(level)])
+        freqs = freqs.at[full_slice(level + 1)].add(freqs[right_slice(level)])
+    return freqs
+
+def fenwick_to_freqs(tree):
+    assert tree.dtype == jnp.uint32
+    size, = tree.shape
+    tree_depth = 0
+    while 1 << tree_depth < size:
+        tree_depth = tree_depth + 1
+
+    for level in range(tree_depth - 2, -1, -1):
+        tree = tree.at[full_slice(level + 1)].add(-tree[left_slice(level)])
+        tree = tree.at[full_slice(level + 1)].add(-tree[right_slice(level)])
+    return tree
+
+def fenwick_insert(tree, symbol):
+    size, = tree.shape
+    def nonzero_case(_):
+        def cond_fun(state):
+            tree, symbol = state
+            return symbol < size
+        def body_fun(state):
+            tree, symbol = state
+            return tree.at[symbol].add(1), fenwick_parent(symbol)
+        return lax.while_loop(cond_fun, body_fun, (tree, symbol))[0]
+    return lax.cond(symbol == 0, lambda _: tree.at[0].add(1), nonzero_case,
+                    None)
+
+def fenwick_remove(tree, symbol):
+    size, = tree.shape
+    def nonzero_case(_):
+        def cond_fun(state):
+            tree, symbol = state
+            return symbol < size
+        def body_fun(state):
+            tree, symbol = state
+            return tree.at[symbol].add(-1), fenwick_parent(symbol)
+        return lax.while_loop(cond_fun, body_fun, (tree, symbol))[0]
+    return lax.cond(symbol == 0, lambda _: tree.at[0].add(-1), nonzero_case,
+                    None)
+
+def fenwick_forward_lookup(tree, symbol):
 
 ##################### High level craystack-style API ##########################
 Codec = namedtuple('Codec', ['push', 'pop'])
