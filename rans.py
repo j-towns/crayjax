@@ -24,8 +24,8 @@ head_prec, head_dtype = 32, 'uint32'
 tail_prec, tail_dtype = 8,  'uint8'
 head_min = 1 << head_prec - tail_prec
 
-def base_message(shape, tail_capacity):
-    return jnp.full(shape, head_min, head_dtype), empty_stack(tail_capacity)
+def base_message(size, tail_capacity):
+    return jnp.full((size,), head_min, head_dtype), empty_stack(tail_capacity)
 
 def empty_stack(capacity):
     return jnp.array([capacity]), jnp.zeros(capacity, tail_dtype)
@@ -34,16 +34,13 @@ def _selector(idxs):
     return jnp.where(idxs, jnp.cumsum(idxs), 0) - 1
 
 def stack_push(stack, idxs, arr):
-    idxs, arr = jnp.ravel(idxs), jnp.ravel(arr)
     limit, data = stack
     limit = limit - idxs.sum()
     return limit, data.at[limit + _selector(idxs)].set(arr)
 
 def stack_pop(stack, idxs):
-    idxs, idxs_shape = jnp.ravel(idxs), idxs.shape
     limit, data = stack
-    return (limit + idxs.sum(), data), jnp.reshape(
-        data[limit + _selector(idxs)], idxs_shape)
+    return (limit + idxs.sum(), data), data[limit + _selector(idxs)]
 
 def stack_check(stack):
     limit, data = stack
@@ -82,14 +79,12 @@ def peek(m, precisions):
 
 def flatten(m):
     head, ([tail_limit,], tail_data) = m
-    head = jnp.ravel(head)
     return jnp.concatenate([(head >> 3 * tail_prec).astype(tail_dtype),
                             (head >> 2 * tail_prec).astype(tail_dtype),
                             (head >> tail_prec).astype(tail_dtype),
                             head.astype(tail_dtype), tail_data[tail_limit:]])
 
-def unflatten(arr, shape, tail_capacity):
-    size = np.prod(shape)
+def unflatten(arr, size, tail_capacity):
     head_highest, head_high, head_low, head_lowest, tail = jnp.split(
         arr, [size, 2 * size, 3 * size, 4 * size])
     head = (head_highest.astype(head_dtype) << 3 * tail_prec
@@ -99,7 +94,7 @@ def unflatten(arr, shape, tail_capacity):
     tail_limit = tail_capacity - tail.size
     tail = (jnp.array([tail_limit]),
             jnp.concatenate([jnp.zeros(tail_limit, tail_dtype), tail]))
-    return jnp.reshape(head, size), tail
+    return head, tail
 
 def message_equal(message1, message2):
     return jnp.all(flatten(message1) == flatten(message2))

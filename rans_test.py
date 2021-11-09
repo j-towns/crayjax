@@ -11,12 +11,12 @@ from jax import lax
 rng = np.random.default_rng(1)
 default_capacity = 1024
 
-def check_codec_unsafe(head_shape, codec, capacity=default_capacity):
-    message = rans.base_message(head_shape, capacity)
+def check_codec_unsafe(head_size, codec, capacity=default_capacity):
+    message = rans.base_message(head_size, capacity)
     message = rans.Uniform(16).push(
-        message, rng.integers(1 << 16, size=head_shape))
+        message, rng.integers(1 << 16, size=head_size))
     message = rans.Uniform(16).push(
-        message, rng.integers(1 << 16, size=head_shape))
+        message, rng.integers(1 << 16, size=head_size))
     push, pop = codec
     message_, data = pop(message)
     message__ = push(message_, data)
@@ -25,22 +25,23 @@ def check_codec_unsafe(head_shape, codec, capacity=default_capacity):
     assert np.all(data == data_)
     assert rans.message_equal(message_, message___)
 
-def check_codec(head_shape, codec, data, capacity=default_capacity):
-    message = rans.base_message(head_shape, capacity)
+def check_codec(head_size, codec, data, capacity=default_capacity):
+    assert data.shape == (head_size,)
+    message = rans.base_message(head_size, capacity)
     push, pop = codec
     message_, data_ = pop(push(message, data))
-    assert rans.message_equal(rans.base_message(head_shape, capacity), message_)
+    assert rans.message_equal(rans.base_message(head_size, capacity), message_)
     assert np.all(data == data_)
 
 def test_rans_simple():
-    shape = (3,)
+    size = 3
     tail_capacity = 100
     precision = 24
     n_data = 10
-    data = rng.integers(0, 4, size=(n_data, *shape))
+    data = rng.integers(0, 4, size=(n_data, size))
 
     # x ~ Categorical(1 / 8, 2 / 8, 3 / 8, 2 / 8)
-    m = m_init = rans.base_message(shape, tail_capacity)
+    m = m_init = rans.base_message(size, tail_capacity)
     enc_fun = (lambda x: (jnp.choose(x, [0, 1, 3, 6]),
                           jnp.choose(x, [1, 2, 3, (1 << 24) - 6])))
     def dec_fun(cf):
@@ -57,7 +58,7 @@ def test_rans_simple():
     assert coded_arr.dtype == np.uint8
 
     # Decode
-    m = rans.unflatten(coded_arr, shape, tail_capacity)
+    m = rans.unflatten(coded_arr, size, tail_capacity)
     data_decoded = []
     for _ in range(n_data):
         m, x = codec_pop(m)
@@ -66,14 +67,14 @@ def test_rans_simple():
     assert_equal(data, data_decoded)
 
 def test_rans_jit():
-    shape = (3,)
+    size = 3
     tail_capacity = 100
     precision = 3
     n_data = 100
-    data = rng.integers(0, 4, size=(n_data, *shape))
+    data = rng.integers(0, 4, size=(n_data, size))
 
     # x ~ Categorical(1 / 8, 2 / 8, 3 / 8, 2 / 8)
-    m = m_init = rans.base_message(shape, tail_capacity)
+    m = m_init = rans.base_message(size, tail_capacity)
     choose = partial(jnp.choose, mode='clip')
     def enc_fun(x):
         assert is_tracing
@@ -101,7 +102,7 @@ def test_rans_jit():
     print("Actual output shape: " + str(16 * len(coded_arr)) + " bits.")
 
     # Decode
-    m = rans.unflatten(coded_arr, shape, tail_capacity)
+    m = rans.unflatten(coded_arr, size, tail_capacity)
     is_tracing = True
     codec_pop(m)
     is_tracing = False
@@ -113,14 +114,14 @@ def test_rans_jit():
     assert_equal(data, data_decoded)
 
 def test_rans_lax_fori_loop():
-    shape = (3,)
+    size = 3
     tail_capacity = 100
     precision = 3
     n_data = 100
-    data = jnp.array(rng.integers(0, 4, size=(n_data, *shape)))
+    data = jnp.array(rng.integers(0, 4, size=(n_data, size)))
 
     # x ~ Categorical(1 / 8, 2 / 8, 3 / 8, 2 / 8)
-    m = m_init = rans.base_message(shape, tail_capacity)
+    m = m_init = rans.base_message(size, tail_capacity)
     choose = partial(jnp.choose, mode='clip')
     def enc_fun(x):
         return (choose(x, jnp.array([0, 1, 3, 6])),
@@ -147,21 +148,21 @@ def test_rans_lax_fori_loop():
         m, xs = carry
         m, x = codec_pop(m)
         return m, lax.dynamic_update_index_in_dim(xs, x, i, 0)
-    m = rans.unflatten(coded_arr, shape, tail_capacity)
+    m = rans.unflatten(coded_arr, size, tail_capacity)
     m, data_decoded = lax.fori_loop(0, n_data, pop_body,
-                                    (m, jnp.zeros((n_data, *shape), 'int32')))
+                                    (m, jnp.zeros((n_data, size), 'int32')))
     assert rans.message_equal(m, m_init)
 
 def test_uniform():
     precision = 4
-    shape = (2, 3, 5)
-    data = rng.integers(precision, size=shape, dtype="uint64")
-    check_codec(shape, rans.Uniform(precision), data)
+    size = 3
+    data = rng.integers(precision, size=size, dtype="uint64")
+    check_codec(size, rans.Uniform(precision), data)
 
 def test_substack():
     prec = 4
-    message = rans.base_message((4, 4), 50)
-    data = rng.integers(1 << prec, size=(2, 4), dtype='uint64')
+    message = rans.base_message(16, 50)
+    data = rng.integers(1 << prec, size=8, dtype='uint64')
     view_split = lambda h: jnp.split(h, 2)
     view_left  = lambda h: view_split(h)[0]
     view_right = lambda h: view_split(h)[1]
@@ -170,11 +171,11 @@ def test_substack():
     np.testing.assert_array_equal(view_right(message_[0]),
                                   view_right(message[0]))
     message_, data_ = pop(message_)
-    assert rans.message_equal(rans.base_message((4, 4), 50), message_)
+    assert rans.message_equal(rans.base_message(16, 50), message_)
     np.testing.assert_equal(data, data_)
 
     append, pop = jax.jit(append), jax.jit(pop)
-    message = rans.base_message((4, 4), 50)
+    message = rans.base_message(16, 50)
     message_ = append(message, data)
     np.testing.assert_array_equal(view_right(message_[0]),
                                   view_right(message[0]))
@@ -182,7 +183,7 @@ def test_substack():
     assert rans.message_equal(message, message_)
     np.testing.assert_equal(data, data_)
 
-    message = rans.base_message((4, 4), 50)
+    message = rans.base_message(16, 50)
     message_ = append(message, data)
     np.testing.assert_array_equal(view_right(message_[0]),
                                   view_right(message[0]))
@@ -192,17 +193,16 @@ def test_substack():
 
 def test_categorical_unsafe():
     precision = 4
-    shape = (5, 3, 5)
-    weights = rng.random((np.prod(shape), 4))
-    weights = np.reshape(weights, shape + (4,))
-    check_codec_unsafe(shape, rans.CategoricalUnsafe(weights, precision))
+    size = 5
+    weights = rng.random((size, 4))
+    check_codec_unsafe(size, rans.CategoricalUnsafe(weights, precision))
 
 def test_bernoulli():
     precision = 2
-    shape = (100,)
-    p = rng.random(shape)
-    data = np.uint64(rng.random(shape) < p)
-    check_codec(shape, rans.Bernoulli(p, precision), data)
+    size = 100
+    p = rng.random(size)
+    data = np.uint64(rng.random(size) < p)
+    check_codec(size, rans.Bernoulli(p, precision), data)
 
 def test_gaussian_stdbins():
     bin_precision = 8
@@ -212,5 +212,5 @@ def test_gaussian_stdbins():
     means = jnp.array(rng.normal(size=batch_size))
     stdds = jnp.array(np.exp(rng.normal(size=batch_size)))
 
-    check_codec_unsafe((batch_size,), rans.DiagGaussian_StdBins(
+    check_codec_unsafe(batch_size, rans.DiagGaussian_StdBins(
             means, stdds, coding_precision, bin_precision))
