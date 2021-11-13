@@ -219,7 +219,7 @@ def DiagGaussian_StdBins(mean, stdd, coding_prec, bin_prec):
 ########################### Example usage #####################################
 if __name__ == "__main__":
     rng = np.random.default_rng(0)
-    shape = (3,)  # The shape of data to be encoded
+    shape = 3  # The shape of data to be encoded
 
     # The compressed message is built up in a JAX DeviceArray. The
     # tail_capacity is the size of that array and will be an upper bound on
@@ -231,7 +231,7 @@ if __name__ == "__main__":
 
     precision = 3
     n_data = 100
-    data = jnp.array(rng.integers(0, 4, size=(n_data, *shape)))
+    data = jnp.array(rng.integers(0, 4, size=(n_data, shape)))
 
     # x ~ Categorical(1 / 8, 2 / 8, 3 / 8, 2 / 8)
     m = m_init = base_message(shape, tail_capacity)
@@ -277,6 +277,6 @@ if __name__ == "__main__":
         return message, lax.dynamic_update_index_in_dim(xs, x, i, 0)
     message = unflatten(coded_arr, shape, tail_capacity)
     message, data_decoded = lax.fori_loop(
-        0, n_data, pop_body, (message, jnp.zeros((n_data, *shape), 'int32')))
+        0, n_data, pop_body, (message, jnp.zeros((n_data, shape), 'int32')))
     assert message_equal(m, m_init)
     np.testing.assert_array_equal(data, data_decoded)
