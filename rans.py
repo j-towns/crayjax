@@ -30,17 +30,22 @@ def base_message(size, tail_capacity):
 def empty_stack(capacity):
     return jnp.array([capacity]), jnp.zeros(capacity, tail_dtype)
 
-def _selector(idxs):
+def _write_selector(idxs):
     return jnp.where(idxs, jnp.cumsum(idxs), 0) - 1
+
+def _read_selector(idxs):
+    # Don't need to worry about overwriting, so can make this slightly faster
+    # than the write selector.
+    return jnp.cumsum(idxs) - 1
 
 def stack_push(stack, idxs, arr):
     limit, data = stack
     limit = limit - idxs.sum()
-    return limit, data.at[limit + _selector(idxs)].set(arr)
+    return limit, data.at[limit + _write_selector(idxs)].set(arr)
 
 def stack_pop(stack, idxs):
     limit, data = stack
-    return (limit + idxs.sum(), data), data[limit + _selector(idxs)]
+    return (limit + idxs.sum(), data), data[limit + _read_selector(idxs)]
 
 def stack_check(stack):
     limit, data = stack
@@ -54,7 +59,7 @@ def push(m, starts, freqs, precs):
         tail = stack_push(tail, idxs, head.astype(tail_dtype))
         head = jnp.where(idxs, head >> tail_prec, head)
     head_div_freqs, head_mod_freqs = jnp.divmod(head, freqs)
-    return (head_div_freqs << precs) + head_mod_freqs + starts, tail
+    return (head_div_freqs << precs) | head_mod_freqs + starts, tail
 
 def pop(m, cfs, starts, freqs, precs):
     head, tail = m
