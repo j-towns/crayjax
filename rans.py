@@ -49,18 +49,10 @@ def stack_check(stack):
 
 def push(m, starts, freqs, precs):
     head, tail = m
-    idxs = head >> 2 * tail_prec + head_prec - precs >= freqs
-    tail = stack_push(tail, idxs, head.astype(tail_dtype))
-    head = jnp.where(idxs, head >> tail_prec, head)
-
-    idxs = head >> 1 * tail_prec + head_prec - precs >= freqs
-    tail = stack_push(tail, idxs, head.astype(tail_dtype))
-    head = jnp.where(idxs, head >> tail_prec, head)
-
-    idxs = head >> head_prec - precs >= freqs
-    tail = stack_push(tail, idxs, head.astype(tail_dtype))
-    head = jnp.where(idxs, head >> tail_prec, head)
-
+    for i in reversed(range(3)):
+        idxs = head >> i * tail_prec + head_prec - precs >= freqs
+        tail = stack_push(tail, idxs, head.astype(tail_dtype))
+        head = jnp.where(idxs, head >> tail_prec, head)
     head_div_freqs, head_mod_freqs = jnp.divmod(head, freqs)
     return (head_div_freqs << precs) + head_mod_freqs + starts, tail
 
